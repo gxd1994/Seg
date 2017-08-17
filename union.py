@@ -5,16 +5,16 @@ import tensorflow as tf
 import numpy as np
 from utils import decode_labels
 
-SEG_MODEL_PATH='./seg_snapshots/model.ckpt-19000'
-DET_MODEL_PATH='./det_snapshots/model.ckpt-6600'
+SEG_MODEL_PATH='./seg_snapshots/model.ckpt-13000'
+DET_MODEL_PATH='./det_snapshots/model.ckpt-7500'
 
 SEG_BATCH_SIZE = 32
 DET_BATCH_SIZE = 8
 
-SAVE_SEG_DIR = './test_result'
-IMAGE_DIR = './test_data'
+SAVE_SEG_DIR = './test_result/img'
+IMAGE_DIR = './test_data/img'
 
-DET_FEATSRIDE = 128
+DET_FEATSRIDE = 32
 
 IMG_MEAN = np.array((69.73,69.73,69.73), dtype=np.float32)
 
@@ -27,6 +27,9 @@ class Union_Test_Net():
         files = os.listdir(image_dir)
         imgname_list = []
         imgs = None
+        img_num = len(files)
+        img_size = cv2.imread(os.path.join(image_dir,files[0])).shape
+        imgs = np.zeros((img_num,img_size[0],img_size[1],img_size[2]),dtype=np.float32)
         for i,file in enumerate(files):
             imgname_list.append(file)
             img = cv2.imread(os.path.join(image_dir,file))
@@ -37,12 +40,13 @@ class Union_Test_Net():
 
             img = img.astype(np.float32)
             img = img - IMG_MEAN
-            img = img[np.newaxis,:,:,:]
-            
-            if i == 0:
-                imgs = img
-            else:
-                imgs = np.concatenate((imgs,img),axis=0)
+            imgs[i] = img
+            # img = img[np.newaxis,:,:,:]
+            #
+            # if i == 0:
+            #     imgs = img
+            # else:
+            #     imgs = np.concatenate((imgs,img),axis=0)
 
         print 'read test imags. shape:',imgs.shape
 
@@ -76,7 +80,7 @@ class Union_Test_Net():
                     end = min((i + 1) * DET_BATCH_SIZE, imgs.shape[0])
                     input_batch = imgs[start:end]
                     det_preds, = sess.run([det_pred],feed_dict={image_batch:input_batch,is_training:False})
-                    print 'det_preds',det_preds.shape
+                    #print 'det_preds',det_preds.shape
                     det_preds = np.squeeze(det_preds,axis=3)
                     #det_preds = det_preds[np.newaxis,:,:,:]
                     if i == 0:

@@ -7,6 +7,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR,'utils'))
 from utils import conv2d,max_pool2d,fully_connected,atrous_conv2d
 from utils import ImageReader,decode_labels
+from utils import py_img_seg_eval
 
 N_CLASSES = 2
 BATCH_SIZE = 16  #1582
@@ -18,9 +19,9 @@ DATA_VAL_LIST_PATH = DATA_DIRECTORY+'/test.txt'
 INPUT_SIZE = '128,128'
 FEATSTRIDE = 1
 LEARNING_RATE = 1e-3
-NUM_STEPS = 20000
+NUM_STEPS = 20000+1
 RANDOM_SCALE = False  #True
-RESTORE_FROM = './seg_snapshots/model.ckpt-19000'
+RESTORE_FROM = None #'./seg_snapshots/model.ckpt-19000'
 SAVE_DIR = './seg_images/'
 SAVE_NUM_IMAGES = 1
 SAVE_PRED_EVERY = 200
@@ -28,6 +29,7 @@ VAL_PRED = 1000
 SNAPSHOT_DIR = './seg_snapshots/'
 WEIGHTS_PATH   = './util/net_weights.ckpt'
 LOG_DIR = './seg_log'
+DELETE_LOG = False
 
 VAL_LOOP = int(math.ceil(float(395)/BATCH_SIZE))
 
@@ -156,21 +158,21 @@ class Seg_Net():
     def inference(self,images,is_training,weight_decay=1e-5):
         self.image_size = images.get_shape()[1:3]
 
-        conv1 = conv2d(images,48,[3,3],'conv1',[1,1],weight_decay=weight_decay,use_xavier =True,
+        conv1 = atrous_conv2d(images,48,[3,3],'conv1',rate=2,weight_decay=weight_decay,use_xavier =True,
                        stddev=1e-3,is_training= is_training,bn=True,activation_fn=tf.nn.relu)
         pool1 = max_pool2d(conv1,[3,3],'pool1',[1,1],padding='SAME')
 
-        conv2 = conv2d(pool1,48,[3,3],'conv2',[1,1],weight_decay=weight_decay,use_xavier=True,
+        conv2 = atrous_conv2d(pool1,48,[3,3],'conv2',rate=2,weight_decay=weight_decay,use_xavier=True,
                         stddev=1e-3,is_training=is_training,bn=True,activation_fn=tf.nn.relu)
         pool2 = max_pool2d(conv2,[3,3],'pool12',[1,1],padding='SAME')
 
 
-        conv3 = conv2d(pool2,96, [3,3], 'conv3', [1, 1], weight_decay=weight_decay, use_xavier=True,
+        conv3 = atrous_conv2d(pool2,96, [3,3], 'conv3', rate=2, weight_decay=weight_decay, use_xavier=True,
                        stddev=1e-3, is_training=is_training, bn=True, activation_fn=tf.nn.relu)
         pool3 = max_pool2d(conv3, [3,3], 'pool13', [1, 1], padding='SAME')
 
 
-        conv4 = conv2d(pool3,128,[3,3],'conv4',[1,1],weight_decay=weight_decay,use_xavier=True,
+        conv4 = atrous_conv2d(pool3,128,[3,3],'conv4',rate=2,weight_decay=weight_decay,use_xavier=True,
                        stddev=1e-3,is_training=is_training,bn=True,activation_fn= tf.nn.relu)
         pool4 = max_pool2d(conv4, [3,3], 'pool14', [1, 1], padding='SAME')
 
@@ -240,8 +242,23 @@ class Seg_Net():
                 miou = (miou/N_CLASSES).astype(np.float32)
                 return miou
 
-            miou = tf.py_func(cal_miou,[confusion_matrix],tf.float32)
-        return miou
+            miou = tf.py_func(cal_miou, [confusion_matrix], tf.float32)
+            # def miou_fun(eval,label):
+            #
+            #     miou1 = 0.0
+            #     for i in range(BATCH_SIZE):
+            #         img = eval[i]
+            #         gt = label[i]
+            #         miou1 += py_img_seg_eval.mean_IU(img, gt)
+            #     miou1 = float(miou1/BATCH_SIZE)
+            #     print miou1
+            #     return miou1
+            #
+
+            #
+            # miou1 = tf.py_func(miou_fun,[logits,label_batch],tf.double)
+
+        return miou  #,miou1
 
     def metrcis(self,logits,label_batch):
         label_batch_final = tf.image.resize_nearest_neighbor(label_batch,tf.stack(logits.get_shape()[1:3]))
@@ -332,8 +349,9 @@ def construct_and_val(args):
             os.makedirs(args.save_dir)
 
         # summary
-        if os.path.exists(args.log_dir):
-            shutil.rmtree(args.log_dir)
+        if DELETE_LOG:
+            if os.path.exists(args.log_dir):
+                shutil.rmtree(args.log_dir)
         summary_writer = tf.summary.FileWriter(args.log_dir, graph=tf.get_default_graph())
 
         merged_val = tf.summary.merge_all(SEG_VAL_COLLECTION)
@@ -404,8 +422,9 @@ def construct_and_train(args):
             os.makedirs(args.save_dir)
 
         # summary
-        if os.path.exists(args.log_dir):
-            shutil.rmtree(args.log_dir)
+        if DELETE_LOG:
+            if os.path.exists(args.log_dir):
+                shutil.rmtree(args.log_dir)
         summary_writer = tf.summary.FileWriter(args.log_dir, graph=tf.get_default_graph())
         
         merged_train = tf.summary.merge_all(SEG_COLLECTION)
@@ -443,6 +462,7 @@ def construct_and_train(args):
 
             # Val result
             if step % VAL_PRED == 0 and step != 0:
+                save(saver, sess, args.snapshot_dir,step)
                 for i in range(VAL_LOOP):
                     print "total val step:%d   cur step:%d"%(VAL_LOOP,i)
                     start_time = time.time()
@@ -454,7 +474,7 @@ def construct_and_train(args):
                     save_val_result(args,step,images,labels,preds,i)
                     print 'step {:<6d}, val: acc = {:.5f}, miou={:.5f}, {:.5f} sec/step'.format(step,acc,miou_value,duration)
 
-                save(saver, sess, args.snapshot_dir,step)
+
 
         summary_writer.close()
     coord.request_stop()
@@ -469,3 +489,26 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# conv1 = conv2d(images, 48, [3, 3], 'conv1', [1, 1], weight_decay=weight_decay, use_xavier=True,
+#                stddev=1e-3, is_training=is_training, bn=True, activation_fn=tf.nn.relu)
+# pool1 = max_pool2d(conv1, [3, 3], 'pool1', [1, 1], padding='SAME')
+#
+# conv2 = conv2d(pool1, 48, [3, 3], 'conv2', [1, 1], weight_decay=weight_decay, use_xavier=True,
+#                stddev=1e-3, is_training=is_training, bn=True, activation_fn=tf.nn.relu)
+# pool2 = max_pool2d(conv2, [3, 3], 'pool12', [1, 1], padding='SAME')
+#
+# conv3 = conv2d(pool2, 96, [3, 3], 'conv3', [1, 1], weight_decay=weight_decay, use_xavier=True,
+#                stddev=1e-3, is_training=is_training, bn=True, activation_fn=tf.nn.relu)
+# pool3 = max_pool2d(conv3, [3, 3], 'pool13', [1, 1], padding='SAME')
+#
+# conv4 = conv2d(pool3, 128, [3, 3], 'conv4', [1, 1], weight_decay=weight_decay, use_xavier=True,
+#                stddev=1e-3, is_training=is_training, bn=True, activation_fn=tf.nn.relu)
+# pool4 = max_pool2d(conv4, [3, 3], 'pool14', [1, 1], padding='SAME')
+#
+# conv5 = conv2d(pool4, N_CLASSES, [3, 3], 'conv5', [1, 1], weight_decay=weight_decay, use_xavier=True,
+#                stddev=1e-3, is_training=is_training, bn=False, activation_fn=None)
+#
+# logits = conv5
+#
+# return logits

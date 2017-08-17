@@ -105,25 +105,25 @@ class ImageReader(object):
           
         Returns:
           Two tensors of size (batch_size, h, w, {3,1}) for images and masks.'''
-        # if is_training:
+        with tf.device('/cpu:0'):
+            num_preprocess_threads = 4
+            if is_training:
+                min_queue_examples = int(0.2*num_elements)
+                image_batch, label_batch = tf.train.shuffle_batch(
+                                                [self.image, self.label],
+                                                batch_size=num_elements,
+                                                num_threads=num_preprocess_threads,
+                                                capacity=min_queue_examples + 3 * num_elements,
+                                                min_after_dequeue=min_queue_examples)
+            else:
 
-        #     num_preprocess_threads = 16
-        #     min_queue_examples = 50
-        #     image_batch, label_batch = tf.train.shuffle_batch(
-        #                                     [self.image, self.label],
-        #                                    batch_size=num_elements,
-        #                                     num_threads=num_preprocess_threads,
-        #                                    capacity=min_queue_examples + 3 * num_elements,
-        #                                     min_after_dequeue=min_queue_examples)
-        # else:
-
-        #     image_batch, label_batch = tf.train.batch([self.image, self.label],
-        #                                             num_threads = 4,
-        #                                             batch_size = num_elements,capacity = 100)
+                image_batch, label_batch = tf.train.batch([self.image, self.label],
+                                                        num_threads = num_preprocess_threads,
+                                                        batch_size = num_elements,capacity = int(1.5*num_elements))
 
 
-        image_batch, label_batch = tf.train.batch([self.image, self.label],
-                                            num_threads = 4,
-                                            batch_size = num_elements,capacity = 15)
+        # image_batch, label_batch = tf.train.batch([self.image, self.label],
+        #                                     num_threads = 4,
+        #                                     batch_size = num_elements,capacity = int(1.5*num_elements))
 
         return image_batch, label_batch
